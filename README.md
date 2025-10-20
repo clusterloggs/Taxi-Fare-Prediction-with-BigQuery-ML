@@ -1,51 +1,64 @@
-# Taxi Fare Prediction with BigQuery ML
+# BigQuery ML: NYC Taxi Fare Prediction
 
-This project is based on the **Engineer Data for Predictive Modeling with BigQuery ML** Qwiklabs challenge.  
-The goal is to clean historical taxi ride data, build a fare prediction model using **BigQuery ML**, and run batch predictions for unseen data.
-
----
-
-## Project Overview
-- **Objective:** Predict taxi fares based on ride details available at the start of a trip.  
-- **Dataset:** Historical NYC taxi rides (`historical_taxi_rides_raw`) and prediction data (`report_prediction_data`).  
-- **Model:** Linear regression built with BigQuery ML.  
-- **Output:** Predicted fares stored in a new table `2015_fare_amount_predictions`.
+This project serves as a rapid proof-of-concept (POC) demonstrating an end-to-end machine learning workflow within Google BigQuery. By leveraging BigQuery ML for fast prototyping, we can quickly build and evaluate a fare prediction model using only SQL before committing resources to a more complex production solution.
 
 ---
 
-## Steps Performed
+## 1. Project Overview
 
-### 1. Data Cleaning
-We cleaned the raw dataset (`historical_taxi_rides_raw`) and stored the result in:
+*   **Business Objective:** To provide customers with an accurate taxi fare estimate before their trip begins.
+*   **Problem Statement:** Predict the total fare amount for a taxi ride in New York City using details available at the time of pickup, such as location coordinates and passenger count.
+*   **Value Proposition:** By integrating this model into a customer-facing application, we can enhance user experience and build trust by providing transparent, upfront pricing.
+
+---
+
+## 2. BigQuery ML Implementation
+
+*   **Dataset Source:** The project utilizes tables within the `taxirides` dataset in BigQuery.
+*   **Features:** The model is trained on `euclidean` distance, `passenger_count`, and `trip_distance`.
+*   **Target Variable:** The model predicts `fare_amount_356`, which is a combination of the base fare and any tolls.
+
+---
+
+## 3. SQL & BQML Workflow
+
+This section documents each phase of the machine learning lifecycle with the actual SQL queries used.
+
+### Phase 1: Data Preparation & Cleaning
+
+First, we clean the raw historical data to create a reliable training set. The cleaned data is stored in a new table, `taxirides.taxi_training_data_753`.
+
+```sql
+CREATE OR REPLACE TABLE `taxirides.taxi_training_data_753` AS
+SELECT
+  -- useful features for prediction
+  passenger_count,
+  trip_distance,
+  pickup_longitude AS pickuplon,
+  pickup_latitude AS pickuplat,
+  dropoff_longitude AS dropofflon,
+  dropoff_latitude AS dropofflat,
+  
+  -- target variable
+  (fare_amount + tolls_amount) AS fare_amount_356
+FROM
+  `taxirides.historical_taxi_rides_raw`
+WHERE
+  trip_distance > 4
+  AND fare_amount >= 3
+  AND passenger_count > 4
+  AND pickup_latitude BETWEEN 40 AND 42
+  AND dropoff_latitude BETWEEN 40 AND 42
+  AND pickup_longitude BETWEEN -74.5 AND -72
+  AND dropoff_longitude BETWEEN -74.5 AND -72
+  AND MOD(ABS(FARM_FINGERPRINT(CAST(pickup_datetime AS STRING))), 1000) = 1;
 ```
-taxirides.taxi_training_data_753
-```
-
-Cleaning rules included:
-- Keep only trips with:
-  - `trip_distance > 4`
-  - `fare_amount >= 3`
-  - `passenger_count > 4`
-- Restrict lat/lon to reasonable NYC ranges:
-  ```sql
-  pickuplat BETWEEN 40 AND 42
-  pickuplon BETWEEN -74.5 AND -72
-  dropofflat BETWEEN 40 AND 42
-  dropofflon BETWEEN -74.5 AND -72
-  ```
-- Construct target variable:
-  ```sql
-  fare_amount_356 = fare_amount + tolls_amount
-  ```
-- Sample to < 1M rows using:
-  ```sql
-  AND MOD(ABS(FARM_FINGERPRINT(CAST(pickup_datetime AS STRING))), 1000) = 1
-  ```
 
 ---
 
-### 2. Model Training
-We trained a linear regression model in BigQuery ML:
+### Phase 2: Model Training
+
+Using the cleaned data, we train a linear regression model directly in BigQuery. The `CREATE MODEL` statement includes feature engineering to calculate the Euclidean distance from coordinates on the fly.
 
 ```sql
 CREATE OR REPLACE MODEL `taxirides.fare_model_859`
@@ -54,12 +67,15 @@ OPTIONS(
   input_label_cols = ['fare_amount_356']
 ) AS
 SELECT
+  -- Feature engineering: calculate geographic distance
   ST_Distance(
     ST_GeogPoint(pickuplon, pickuplat),
     ST_GeogPoint(dropofflon, dropofflat)
   ) AS euclidean,
+  -- Other features
   passenger_count,
   trip_distance,
+  -- Label
   fare_amount_356
 FROM
   `taxirides.taxi_training_data_753`;

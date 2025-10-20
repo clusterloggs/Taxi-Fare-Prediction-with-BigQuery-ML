@@ -1,0 +1,1 @@
+SELECT * FROM ML.EVALUATE(MODEL `taxirides.fare_model_859`);
